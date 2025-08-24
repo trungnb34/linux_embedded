@@ -52,5 +52,7 @@ int main() {
         sendto(sockfd, response, strlen(response), 0, (struct sockaddr *)&client_addr, addr_len);
     }
 
+    close(sockfd);
+
     return 0;
 }

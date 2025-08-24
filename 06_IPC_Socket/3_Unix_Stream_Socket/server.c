@@ -2,27 +2,25 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <arpa/inet.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <pthread.h>
 #include "common.h"
+#include <arpa/inet.h>
 
-#define PORT 8081
+#define SOCKET_PATH "/tmp/socket"
 #define BUFFER_SIZE 1024
-#define BUFFER_SIZE_RESPONSE 2024
 #define QUEUE_SIZE_CLIENT 5
-#define SERVER_IP "127.0.0.1"
+#define CREATE_SOCKET_FAIL -1
 #define FLAG_HANDEL_SUCCESS 0
-
-/*
-    Define the package comunicate between client and server
-    split each package send client to server by # 
-*/
+#define BUFFER_SIZE_RESPONSE 2024
 
 struct client_infor
 {
     int client_fd;
-    struct sockaddr_in client_addr;
+    struct sockaddr_un client_addr;
 } client_infor;
+
 
 void* handle_comunicate_socket(void *args) {
     // relase buffer of thread when it end of handle
@@ -30,9 +28,9 @@ void* handle_comunicate_socket(void *args) {
     struct client_infor *infor = (struct client_infor *)args;
     char buffer[BUFFER_SIZE];
     
-    char client_ip[INET_ADDRSTRLEN];
-    inet_ntop(AF_INET, &(infor->client_addr.sin_addr), client_ip, sizeof(client_ip));
-    printf("Client connected : IP = %s, PORT = %d\n", client_ip, ntohs(infor->client_addr.sin_port));
+    // char client_ip[INET_ADDRSTRLEN];
+    // inet_ntop(AF_INET, &(infor->client_addr.sin_addr), client_ip, sizeof(client_ip));
+    printf("Client connected\n");
     
     ssize_t bytes_read;
     char cache_data[BUFFER_SIZE]; // to save cache if message does not have a end charactor
@@ -47,7 +45,7 @@ void* handle_comunicate_socket(void *args) {
         handle_message(&total_message, buffer, cache_data);
         if (total_message.count != 0) {
             for (int i = 0; i < total_message.count; i++) {
-                printf("Message from %s : %d is [%d] = %s\n",client_ip, ntohs(infor->client_addr.sin_port), i, total_message.tokens[i]);
+                printf("Message from client is [%d] = %s\n", i, total_message.tokens[i]);
                 char response[BUFFER_SIZE_RESPONSE];
                 add_separate_char_to_message(buffer);
                 snprintf(response, BUFFER_SIZE_RESPONSE, "Server receive: %s", buffer);
@@ -63,47 +61,41 @@ void* handle_comunicate_socket(void *args) {
 }
 
 int main() {
-
     int server_fd, client_fd;
-    struct sockaddr_in address, client_addr;
-    socklen_t addrlen = sizeof(client_addr);
+    struct sockaddr_un server_addr, client_addr;
+    socklen_t client_len = sizeof(struct sockaddr_un);
+    char buffer[BUFFER_SIZE];
+
+    // delete old socker if it is already exits
+    unlink(SOCKET_PATH);
     
-    // create the socket if fail then return < 0 
-    if ((server_fd = socket(AF_INET, SOCK_STREAM, 0)) < FLAG_HANDEL_SUCCESS) {
-        printf("Create server socket fail\n");
-        exit(EXIT_FAILURE);
+    // create socket 
+    if ((server_fd = socket(AF_UNIX, SOCK_STREAM, 0)) == CREATE_SOCKET_FAIL) {
+        printf("CREATE SOCKET FAIL\n");
+        return EXIT_FAILURE;
     }
 
-    // setup server information
-    memset(&address, 0, sizeof(address));
-    address.sin_family = AF_INET;
-    // set ip address for server if want to run on local host the choose ip : 127.0.0.1
-    // if want to in network choose the ip of device
-    inet_pton(AF_INET, SERVER_IP, &address.sin_addr);
-    address.sin_port = htons(PORT);
-    
+    // setting socket address
+    memset(&server_addr, 0, sizeof(struct sockaddr_un));
+    server_addr.sun_family = AF_UNIX;
+    strncpy(server_addr.sun_path, SOCKET_PATH, sizeof(server_addr.sun_path) - 1); // copy socket path to server address , sizeoff need to -1 cause dont need \0 char
 
-    // Binding return < 0 if binding failure
-    if (bind(server_fd, (struct sockaddr *)&address, sizeof(address)) < FLAG_HANDEL_SUCCESS) {
-        printf("Binding server socket fail\n");
-        close(server_fd);
-        exit(EXIT_FAILURE);
+    // binding socket_fd to socket path
+    if (bind(server_fd, (struct sockaddr *)&server_addr, sizeof(struct sockaddr) - 1) == CREATE_SOCKET_FAIL) {
+        printf("Binding fail \n");
+        return EXIT_FAILURE;
     }
 
-    // listen return < 0 if listen fail
-    if (listen(server_fd, QUEUE_SIZE_CLIENT) < FLAG_HANDEL_SUCCESS) {
-        printf("Listen\n");
-        close(server_fd);
-        exit(EXIT_FAILURE);
+    if (listen(server_fd, QUEUE_SIZE_CLIENT) == CREATE_SOCKET_FAIL) {
+        printf("Listen error\n");
+        return EXIT_FAILURE;
     }
 
-    printf("Server listening on port %d\n", PORT);
+    printf("Unix socket server listening on %s \n", SOCKET_PATH);
 
-    // create while 1 to wait any client connect
-    
     while (1)
     {
-        client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &addrlen);
+        client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
         // if client_fd < 0 then connection fail
         if (client_fd < FLAG_HANDEL_SUCCESS) {
             printf("Connection fail \n");
@@ -119,14 +111,14 @@ int main() {
         client->client_addr = client_addr;
         pthread_t tid;
         // create thread handle message between client and server 
-        if (pthread_create(&tid, NULL, handle_comunicate_socket, client) != 0) {
+        if (pthread_create(&tid, NULL, handle_comunicate_socket, client) != FLAG_HANDEL_SUCCESS) {
             printf("Create thread fail\n");
             free(client);
             continue;
         }
     }
-    
     close(server_fd);
+    unlink(SOCKET_PATH);
 
-    return EXIT_SUCCESS;
+    return 0;
 }

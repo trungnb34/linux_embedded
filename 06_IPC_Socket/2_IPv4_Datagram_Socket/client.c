@@ -47,5 +47,7 @@ int main() {
         printf("Server response: %s\n", buffer);
     }
 
+    close(sockfd);
+
     return 0;
 }
