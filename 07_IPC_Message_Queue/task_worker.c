@@ -34,7 +34,6 @@ int main() {
     char *buffer = malloc(attr.mq_msgsize);
     printf("Waiting the message data from client\n");
     while (1) {
-        // ssize_t bytes = mq_receive(mq, buffer, MAX_SIZE, &prio);
         if (mq_receive(mq, buffer, attr.mq_msgsize, &prio) == -1) {
             perror("Receive message fail\n");
             exit(EXIT_FAILURE);
